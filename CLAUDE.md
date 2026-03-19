@@ -38,5 +38,5 @@ Single-file Axum web server (`src/main.rs`) with a cache-aside pattern using Red
 
 ## Code Conventions
 
-- Comments and UI text are in Spanish
+- Comments and UI text are in English
 - Rust 2021 edition

@@ -1,44 +1,44 @@
 // ================= IMPORTS =================
 
-// Axum: framework web asíncrono
+// Axum: async web framework
 use axum::{
-    extract::{Path, State}, // Permite leer parámetros de URL y estado global
-    response::Html,         // Permite responder HTML
-    routing::{get, post},   // Métodos HTTP
-    Json, Router,           // Manejo de JSON y definición de rutas
+    extract::{Path, State}, // Reads URL parameters and shared state
+    response::Html,         // Returns HTML responses
+    routing::{get, post},   // HTTP methods
+    Json, Router,           // JSON handling and route definitions
 };
 
-// Redis en modo async (hget, hset, keys, etc.)
+// Async Redis commands (hget, hset, keys, etc.)
 use redis::AsyncCommands;
 
-// Serde: serialización y deserialización JSON <-> structs
+// Serde: JSON serialization and deserialization <-> structs
 use serde::{Deserialize, Serialize};
 
-// Pool de conexiones a PostgreSQL (async y type‑safe)
+// PostgreSQL connection pool (async and type-safe)
 use sqlx::PgPool;
 
-// Arc permite compartir estado entre múltiples requests async
+// Arc shares state across multiple async requests
 use std::sync::Arc;
 
-// ================= ESTADO GLOBAL =================
+// ================= GLOBAL STATE =================
 
-/// Estado compartido de la aplicación.
+/// Shared application state.
 ///
-/// Contiene las conexiones a:
-/// - PostgreSQL (base de datos principal)
-/// - Redis (caché)
+/// Contains connections to:
+/// - PostgreSQL (primary database)
+/// - Redis (cache)
 #[derive(Clone)]
 struct AppState {
     pg: PgPool,
     redis: redis::Client,
 }
 
-// ================= MODELO DE DATOS =================
+// ================= DATA MODEL =================
 
-/// Representa un usuario en:
+/// Represents a user in:
 /// - PostgreSQL
-/// - Respuestas JSON de la API
-/// - Datos almacenados en Redis
+/// - API JSON responses
+/// - Data stored in Redis
 #[derive(Serialize, Deserialize, sqlx::FromRow, Clone)]
 struct User {
     id: i32,
@@ -47,30 +47,30 @@ struct User {
 
 // ================= MAIN =================
 
-/// Punto de entrada de la aplicación.
+/// Application entry point.
 ///
-/// - Inicia runtime async de Tokio
-/// - Conecta a Postgres y Redis
-/// - Configura rutas HTTP
-/// - Levanta servidor en localhost:8080
+/// - Starts the Tokio async runtime
+/// - Connects to Postgres and Redis
+/// - Configures HTTP routes
+/// - Starts the server on localhost:8080
 #[tokio::main]
 async fn main() {
-    // ---------- Conexión a PostgreSQL ----------
+    // ---------- PostgreSQL connection ----------
     let pg_pool = PgPool::connect("postgres://postgres:postgres@localhost:5432/rustdb")
         .await
-        .expect("No conecta a Postgres");
+        .expect("Failed to connect to Postgres");
 
-    // ---------- Conexión a Redis ----------
+    // ---------- Redis connection ----------
     let redis_client = redis::Client::open("redis://127.0.0.1/")
-        .expect("No conecta a Redis");
+        .expect("Failed to connect to Redis");
 
-    // ---------- Estado compartido ----------
+    // ---------- Shared state ----------
     let state = Arc::new(AppState {
         pg: pg_pool,
         redis: redis_client,
     });
 
-    // ---------- Definición de rutas ----------
+    // ---------- Route definitions ----------
     let app = Router::new()
         .route("/", get(index))
         .route("/users", post(create_user).get(list_users_db))
@@ -79,43 +79,43 @@ async fn main() {
         .route("/cache/clear", post(clear_cache))
         .with_state(state);
 
-    println!("Servidor en http://127.0.0.1:8080");
+    println!("Server running at http://127.0.0.1:8080");
 
-    // ---------- Listener TCP ----------
+    // ---------- TCP listener ----------
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
         .await
         .unwrap();
 
-    // ---------- Servidor HTTP ----------
+    // ---------- HTTP server ----------
     axum::serve(listener, app).await.unwrap();
 }
 
 // ================= HTML =================
 
-/// Devuelve una página HTML simple para probar la API desde el navegador.
+/// Returns a simple HTML page for testing the API in the browser.
 async fn index() -> Html<String> {
     let html = r#"
     <html>
         <body style="font-family: sans-serif">
             <h1>Rust + Postgres + Redis</h1>
 
-            <h2>Crear usuario</h2>
+            <h2>Create user</h2>
             <input id="id" placeholder="id" />
             <input id="name" placeholder="name" />
-            <button onclick="createUser()">Crear</button>
+            <button onclick="createUser()">Create</button>
 
-            <h2>Buscar usuario (usa cache)</h2>
-            <input id="searchId" placeholder="id usuario" />
-            <button onclick="fetchUser()">Buscar y cachear</button>
+            <h2>Find user (uses cache)</h2>
+            <input id="searchId" placeholder="user id" />
+            <button onclick="fetchUser()">Fetch and cache</button>
             <pre id="userResult"></pre>
 
-            <h2>Usuarios en PostgreSQL</h2>
-            <button onclick="loadDb()">Refrescar DB</button>
+            <h2>Users in PostgreSQL</h2>
+            <button onclick="loadDb()">Refresh DB</button>
             <pre id="db"></pre>
 
-            <h2>Usuarios en Redis (cache)</h2>
-            <button onclick="loadCache()">Refrescar Cache</button>
-            <button onclick="clearCache()">🧹 Limpiar Cache</button>
+            <h2>Users in Redis (cache)</h2>
+            <button onclick="loadCache()">Refresh cache</button>
+            <button onclick="clearCache()">Clear cache</button>
             <pre id="cache"></pre>
 
             <script>
@@ -167,10 +167,10 @@ async fn index() -> Html<String> {
 
 // ================= CREATE USER =================
 
-/// Inserta un usuario en PostgreSQL.
+/// Inserts a user into PostgreSQL.
 async fn create_user(
-    State(state): State<Arc<AppState>>, // Acceso al estado global
-    Json(user): Json<User>,             // JSON recibido en el body
+    State(state): State<Arc<AppState>>, // Access to shared state
+    Json(user): Json<User>,             // JSON received in the request body
 ) -> String {
     sqlx::query("INSERT INTO users (id, name) VALUES ($1, $2)")
         .bind(user.id)
@@ -179,51 +179,51 @@ async fn create_user(
         .await
         .unwrap();
 
-    "User added to PostgreSQL".to_string()
+    "User inserted into PostgreSQL".to_string()
 }
 
 // ================= GET USER (CACHE FIRST) =================
 
-/// Obtiene un usuario:
-/// 1. Busca primero en Redis (cache)
-/// 2. Si no existe, consulta PostgreSQL
-/// 3. Guarda resultado en Redis
+/// Gets a user:
+/// 1. Checks Redis first (cache)
+/// 2. If missing, queries PostgreSQL
+/// 3. Stores the result in Redis
 async fn get_user(
     Path(id): Path<i32>,
     State(state): State<Arc<AppState>>,
 ) -> String {
     let key = format!("user:{id}");
 
-    // Conexión async a Redis
+    // Async Redis connection
     let mut redis_conn = state.redis.get_multiplexed_async_connection().await.unwrap();
 
-    // Intentar leer desde cache
+    // Try reading from cache
     let cached: Option<String> = redis_conn.hget(&key, "data").await.unwrap_or(None);
 
-    // Si existe en cache → devolver inmediatamente
+    // If present in cache, return immediately
     if let Some(json) = cached {
-        return format!("CACHE → {json}");
+        return format!("CACHE -> {json}");
     }
 
-    // Si no está en cache → consultar PostgreSQL
+    // If missing from cache, query PostgreSQL
     let user = sqlx::query_as::<_, User>("SELECT id, name FROM users WHERE id = $1")
         .bind(id)
         .fetch_one(&state.pg)
         .await
         .unwrap();
 
-    // Convertir a JSON
+    // Convert to JSON
     let json = serde_json::to_string(&user).unwrap();
 
-    // Guardar en Redis
+    // Store in Redis
     let _: () = redis_conn.hset(&key, "data", &json).await.unwrap();
 
-    format!("DB → {json}")
+    format!("DB -> {json}")
 }
 
 // ================= LIST USERS FROM DB =================
 
-/// Lista todos los usuarios desde PostgreSQL.
+/// Lists all users from PostgreSQL.
 async fn list_users_db(State(state): State<Arc<AppState>>) -> String {
     let users: Vec<User> = sqlx::query_as("SELECT id, name FROM users ORDER BY id")
         .fetch_all(&state.pg)
@@ -235,11 +235,11 @@ async fn list_users_db(State(state): State<Arc<AppState>>) -> String {
 
 // ================= LIST CACHE =================
 
-/// Lista todos los usuarios almacenados en Redis.
+/// Lists all users stored in Redis.
 async fn list_users_cache(State(state): State<Arc<AppState>>) -> String {
     let mut redis_conn = state.redis.get_multiplexed_async_connection().await.unwrap();
 
-    // Buscar claves tipo "user:*"
+    // Find keys matching "user:*"
     let keys: Vec<String> = redis_conn.keys("user:*").await.unwrap_or_default();
 
     let mut results = Vec::new();
@@ -257,7 +257,7 @@ async fn list_users_cache(State(state): State<Arc<AppState>>) -> String {
 
 // ================= CLEAR CACHE =================
 
-/// Limpia completamente la base de datos de Redis.
+/// Clears the current Redis database completely.
 async fn clear_cache(State(state): State<Arc<AppState>>) -> String {
     let mut redis_conn = state.redis.get_multiplexed_async_connection().await.unwrap();
 
@@ -266,5 +266,5 @@ async fn clear_cache(State(state): State<Arc<AppState>>) -> String {
         .await
         .unwrap();
 
-    "Cache limpiado".to_string()
+    "Cache cleared".to_string()
 }
